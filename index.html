@@ -3154,7 +3154,7 @@ let mem=null;
 function load(){try{const s=localStorage.getItem(KEY);return s?JSON.parse(s):null}catch(e){return mem}}
 function save(){try{localStorage.setItem(KEY,JSON.stringify(S))}catch(e){mem=S}}
 let S=load()||{};
-S.done=S.done||{}; S.quiz=S.quiz||{}; S.gloss=S.gloss||{}; S.cap=S.cap||{}; S.fin=S.fin||{}; S.visited=S.visited||{};
+S.done=S.done||{}; S.pos=S.pos||{}; S.readp=S.readp||{}; S.quiz=S.quiz||{}; S.gloss=S.gloss||{}; S.cap=S.cap||{}; S.fin=S.fin||{}; S.visited=S.visited||{};
 function toast(t){const el=$('#toast');el.textContent=t;el.classList.add('on');clearTimeout(toast._t);toast._t=setTimeout(()=>el.classList.remove('on'),2200)}
 
 /* ---------- Progress ---------- */
@@ -3264,7 +3264,7 @@ document.addEventListener('click',e=>{
 /* ---------- Views ---------- */
 function mountWidgets(root){$$('[data-widget]',root).forEach(el=>{const f=WIDGETS[el.dataset.widget];if(f){try{f(el)}catch(err){el.innerHTML='<p class="tiny">Interactive element failed to load.</p>';console.error(err)}}});}
 function chapProg(c){const ms=c[3].map(n=>MODULES.find(m=>m.n===n));const d=ms.filter(m=>S.done[m.id]).length;return [d,ms.length];}
-function modRow(m){return `<a class="home-mod${S.done[m.id]?' done':''}" href="#/m/${m.n}"><span class="num">${S.done[m.id]?'✓':pad(m.n)}</span><span><b>${m.t}</b><span>~${m.mins} min · ${m.sec.length} sections</span></span><span class="go">›</span></a>`;}
+function modRow(m){const rp=S.done[m.id]?100:(S.readp[m.id]||0);return `<a class="home-mod${S.done[m.id]?' done':''}" href="#/m/${m.n}"><span class="num">${S.done[m.id]?'✓':pad(m.n)}</span><span style="flex:1;min-width:0"><b>${m.t}</b><span>~${m.mins} min · ${S.done[m.id]?'completed':(rp?rp+'% read':m.sec.length+' sections')}</span>${rp&&!S.done[m.id]?`<span class="progressbar" style="display:block;margin-top:6px;height:4px"><i style="width:${rp}%"></i></span>`:''}</span><span class="go">›</span></a>`;}
 function viewHome(){
   const {d,nm,pct}=progress();
   const last=S.last&&!/^#\/(home|learn|notes|practice|progress)$/.test(S.last)?S.last:null;
@@ -3279,8 +3279,9 @@ function viewHome(){
   <div class="progressbar" style="margin-top:14px"><i style="width:${pct}%"></i></div></section>
   <div class="exec"><div class="ttl">Executive summary</div><p class="so">The car is becoming a computer on wheels, and more of its value comes from software that keeps improving after you buy it.</p>
   <ol><li><b>Architecture is consolidating.</b> Dozens of single-purpose ECUs give way to a few central computers plus location-based zone controllers on an Ethernet backbone.</li><li><b>Software is layered and decoupled.</b> Operating systems, AUTOSAR, middleware and services let features be updated over the air and reused across models.</li><li><b>Making it real is hard.</b> Safety, security, validation, organisation and economics decide who succeeds — see the case studies.</li></ol></div>
-  <h2>Up next</h2>
-  <a class="card" href="#/m/${nextM.n}" style="display:block;color:var(--tx);text-decoration:none;border-left:4px solid var(--red)"><div class="kicker">Chapter ${nextM.ch[0]} · Module ${pad(nextM.n)}</div><h3 style="margin:.3em 0">${nextM.t}</h3><p class="small muted" style="margin:0">${nextM.ax}</p></a>
+  ${(()=>{const lm=/^#\/m\/(\d+)/.exec(S.last||'');const cm=lm?MODULES.find(x=>x.n===+lm[1]):null;
+    if(cm&&!S.done[cm.id]){const rp=S.readp[cm.id]||0;return `<h2>Continue reading</h2><a class="card" href="#/m/${cm.n}" style="display:block;color:var(--tx);text-decoration:none;border-left:4px solid var(--red)"><div class="kicker">📖 Bookmark · Module ${pad(cm.n)}</div><h3 style="margin:.3em 0">${cm.t}</h3><div class="progressbar" style="margin:10px 0 6px"><i style="width:${rp}%"></i></div><span class="tiny">${rp}% read · opens exactly where you stopped</span></a>`;}
+    return `<h2>Up next</h2><a class="card" href="#/m/${nextM.n}" style="display:block;color:var(--tx);text-decoration:none;border-left:4px solid var(--red)"><div class="kicker">Chapter ${nextM.ch[0]} · Module ${pad(nextM.n)}</div><h3 style="margin:.3em 0">${nextM.t}</h3><p class="small muted" style="margin:0">${nextM.ax}</p></a>`;})()}
   <h2>Your journey</h2><p class="tiny" style="margin-top:-6px">Swipe →</p>
   <div class="hscroll">${CHAPTERS.map(c=>{const [cd,ct]=chapProg(c);return `<a class="jcard" href="#/learn" style="${cd===ct?'border-color:var(--green)':''}"><div class="rn">${c[0]}</div><b style="display:block;margin:2px 0 4px">${c[1]}</b><span class="tiny" style="display:block;min-height:3.2em">${c[2]}</span><div class="progressbar" style="margin-top:8px"><i style="width:${cd/ct*100}%"></i></div><span class="tiny">${cd}/${ct} modules</span></a>`}).join('')}</div>
   <h2>The SDV in one picture</h2>
@@ -3405,6 +3406,18 @@ $('#themeBtn').onclick=()=>{S.theme=(S.theme||'light')==='light'?'dark':'light';
 const readFg=$('#readFg');
 function readBar(){const h=document.documentElement.scrollHeight-innerHeight;readFg.style.width=(h>0?Math.min(100,scrollY/h*100):0)+'%';}
 window.addEventListener('scroll',readBar,{passive:true});
+/* ---------- Bookmarks: remember position like a book ---------- */
+let quietUntil=0,saveT=null;
+function rememberScroll(){
+  if(Date.now()<quietUntil)return;
+  const h=curHash(),y=Math.round(scrollY);S.pos[h]=y;
+  const mm=/^#\/m\/(\d+)/.exec(h);
+  if(mm){const max=document.documentElement.scrollHeight-innerHeight;const f=max>0?Math.min(1,(y+innerHeight*0.4)/max):0;const id='m'+pad(+mm[1]);S.readp[id]=Math.max(S.readp[id]||0,Math.round(f*100));}
+  clearTimeout(saveT);saveT=setTimeout(save,300);
+}
+window.addEventListener('scroll',()=>{if(!rememberScroll._t){rememberScroll._t=setTimeout(()=>{rememberScroll._t=null;rememberScroll();},250);}},{passive:true});
+window.addEventListener('pagehide',()=>{rememberScroll();save();});
+document.addEventListener('visibilitychange',()=>{if(document.hidden){rememberScroll();save();}});
 /* ---------- Router ---------- */
 const VIEWS=XVIEWS;
 window.SDV={VIEWS,S,save,quizHTML,paintScore,QZ,toast,buildNav,updateRing,progress,normQ};
@@ -3422,6 +3435,7 @@ function route(){
     else if(VIEWS[p[0]]) out=VIEWS[p[0]](p.slice(1).map(decodeURIComponent));
     else out=notFound();
   }catch(err){console.error(err);out=`<div class="wrap"><h1>Something went wrong</h1><p class="muted">${esc(err.message)}</p><p><a href="#/home">Home</a></p></div>`;}
+  const savedY=S.pos[hsh]||0;quietUntil=Date.now()+900;
   const html=typeof out==='string'?out:out.html;
   main.innerHTML=html;
   if(typeof closeDex==='function')closeDex();
@@ -3430,18 +3444,24 @@ function route(){
   if(out&&out.after)out.after();
   paintTabs(p[0]);
   $$('.quiz',main).forEach(q=>paintScore(q.id.replace('qz-','')));
-  if(!(out&&out.keepScroll))window.scrollTo(0,0);
+  if(!(out&&out.keepScroll))window.scrollTo({top:0,behavior:'instant'});
+  const restorable=/^(m|notes|glossary|cases|refs|faq|master|nova)$/.test(p[0])&&!(p[0]==='m'&&p[2]);
+  if(restorable&&savedY>250){setTimeout(()=>{window.scrollTo({top:savedY,behavior:'instant'});quietUntil=Date.now()+300;if(p[0]==='m'||firstRoute)toast('📖 Picked up where you left off');},60);}
   if(out&&out.after2)out.after2();
   if(p[0]!=='progress'){S.last=hsh;save();}
   buildNav(); updateRing();
-  const rb=$('#resetAll'); if(rb) rb.onclick=()=>{if(confirm('Reset all progress, quiz answers, glossary marks and capstone decisions?')){for(const k of Object.keys(S))delete S[k];S.done={};S.quiz={};S.gloss={};S.cap={};S.fin={};S.visited={};S.dex={};S.dexSeen={};applyTheme();save();route();toast('Progress reset');}};
+  const rb=$('#resetAll'); if(rb) rb.onclick=()=>{if(confirm('Reset all progress, quiz answers, glossary marks and capstone decisions?')){for(const k of Object.keys(S))delete S[k];S.done={};S.quiz={};S.gloss={};S.cap={};S.fin={};S.visited={};S.dex={};S.dexSeen={};S.pos={};S.readp={};applyTheme();save();route();toast('Progress reset');}};
   readBar();
   document.title=(main.querySelector('h1')?main.querySelector('h1').textContent+' — ':'')+'SDV Masterclass';
 }
 window.addEventListener('hashchange',()=>{let h='';try{h=location.hash}catch(e){}if(h.startsWith('#/')&&h!==CUR){CUR=h;route();}});
 window.SDV.route=route;window.SDV.go=go;
+let firstRoute=true;
+/* On launch, reopen the last page you were reading (like a book) */
+(function(){let h='';try{h=location.hash}catch(e){}
+  if((!h||h==='#'||h==='#/home')&&S.last&&/^#\/(m|notes|dex|glossary|cases|master|flows|capstone|assess)\//.test(S.last+'/')&&S.last!=='#/home'){CUR=S.last;try{history.replaceState(null,'',S.last)}catch(e){}}})();
 function finalResult(){if(window.SDV.finalResult)window.SDV.finalResult();}
-route();
+route();firstRoute=false;
 })();
 </script>
 </body></html>
